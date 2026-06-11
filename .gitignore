@@ -1,0 +1,17 @@
+# Binaire
+/translai
+/dist/
+
+# Go
+*.test
+*.out
+coverage.*
+
+# Config / jobs runtime
+/config/
+/subs-fr/
+
+# Éditeurs
+.idea/
+.vscode/
+*.swp

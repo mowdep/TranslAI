@@ -1,0 +1,35 @@
+# Config golangci-lint. Gate de chaque milestone : `make lint` doit être vert.
+run:
+  timeout: 3m
+  tests: true
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - goimports
+    - revive
+    - misspell
+    - bodyclose      # HTTP response body fermé (provider openai_compat)
+    - gosec          # clés API, lecture fichiers
+
+issues:
+  exclude-rules:
+    # Tests : tolérer assertions d'erreur ignorées et constantes dupliquées
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
+        - dupl
+
+linters-settings:
+  goimports:
+    local-prefixes: github.com/gabrielfareau/translai
+  revive:
+    rules:
+      - name: exported
+        disabled: true   # docstrings exportées non bloquantes en v0

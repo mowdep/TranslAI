@@ -1,0 +1,13 @@
+1
+00:00:01,000 --> 00:00:03,000
+Hello there, how are you today?
+I hope everything is going well.
+
+2
+00:00:04,500 --> 00:00:06,800
+<i>This is an italic line.</i>
+
+3
+00:00:07,000 --> 00:00:10,200
+The weather is beautiful this morning,
+and the birds are singing in the trees.

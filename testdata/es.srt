@@ -1,0 +1,13 @@
+1
+00:00:01,000 --> 00:00:03,000
+Hola, ¿cómo estás hoy?
+Espero que todo vaya bien.
+
+2
+00:00:04,500 --> 00:00:06,800
+<i>Esta es una línea en cursiva.</i>
+
+3
+00:00:07,000 --> 00:00:10,200
+El clima está hermoso esta mañana,
+y los pájaros cantan en los árboles.

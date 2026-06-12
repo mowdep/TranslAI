@@ -90,28 +90,72 @@ type FileResult struct {
 
 // Server est le serveur HTTP de translai.
 type Server struct {
-	router    *chi.Mux
-	cfg       *config.Store
-	jobs      JobStore
-	addr      string
-	srv       *http.Server
-	tmpl      *template.Template // template set pour la page convert (/)
-	tmplAdmin *template.Template // template set pour la page admin (/admin)
-	cfgPath   string
+	router      *chi.Mux
+	cfg         *config.Store
+	jobs        JobStore
+	reviewStore ReviewStore
+	flushMgr    *FlushManager
+	workDir     string
+	addr        string
+	srv         *http.Server
+	tmpl        *template.Template // template set pour la page convert (/)
+	tmplAdmin   *template.Template // template set pour la page admin (/admin)
+	tmplReview  *template.Template // template set pour la page review (/review)
+	cfgPath     string
 }
 
 // New crée un Server prêt à démarrer.
 // cfgPath est le chemin vers config.yaml utilisé pour sauvegarder via POST /api/config.
 func New(addr string, store *config.Store, cfgPath string) *Server {
+	return NewWithWorkDir(addr, store, cfgPath, "")
+}
+
+// NewWithWorkDir crée un Server avec un répertoire de travail pour le write-behind.
+func NewWithWorkDir(addr string, store *config.Store, cfgPath, workDir string) *Server {
+	rs := NewReviewStore()
+	var fm *FlushManager
+	if workDir != "" {
+		fm = NewFlushManager(rs, workDir)
+		fm.Start()
+	}
 	s := &Server{
-		addr:    addr,
-		cfg:     store,
-		jobs:    newMemJobStore(),
-		cfgPath: cfgPath,
+		addr:        addr,
+		cfg:         store,
+		jobs:        newMemJobStore(),
+		reviewStore: rs,
+		flushMgr:    fm,
+		workDir:     workDir,
+		cfgPath:     cfgPath,
 	}
 	s.loadTemplates()
 	s.mountRoutes()
 	return s
+}
+
+// reviewFuncMap contient les fonctions disponibles dans review.html.
+var reviewFuncMap = template.FuncMap{
+	"flagIcon": func(f Flag) string {
+		switch f {
+		case FlagEcho:
+			return "echo"
+		case FlagEmpty:
+			return "vide"
+		case FlagRatioLow:
+			return "ratio-"
+		case FlagRatioHigh:
+			return "ratio+"
+		case FlagLineMismatch:
+			return "lignes"
+		case FlagFallback:
+			return "fallback"
+		case FlagCPSHigh:
+			return "cps!"
+		case FlagLongLine:
+			return "long"
+		default:
+			return string(f)
+		}
+	},
 }
 
 // loadTemplates parse les templates embarqués.
@@ -128,13 +172,14 @@ func (s *Server) loadTemplates() {
 		"web/templates/layout.html",
 		"web/templates/admin.html",
 	))
-	// On stocke les deux dans le champ tmpl via une convention de nommage :
-	// utiliser AddParseTree pour combiner dans un seul template.
-	// Approche alternative : stocker les deux sets séparément.
-	_ = convert
-	_ = admin
+	// Template set review : layout + review.html (avec FuncMap)
+	review := template.Must(template.New("layout.html").Funcs(reviewFuncMap).ParseFS(templatesFS,
+		"web/templates/layout.html",
+		"web/templates/review.html",
+	))
 	s.tmpl = convert
 	s.tmplAdmin = admin
+	s.tmplReview = review
 }
 
 // mountRoutes configure le router chi.
@@ -159,6 +204,12 @@ func (s *Server) mountRoutes() {
 	r.Get("/api/convert/stream", s.handleConvertStream)
 	r.Get("/api/download", s.handleDownload)
 	r.Get("/api/download/all", s.handleDownloadAll)
+
+	// Review (editeur d'alignement)
+	r.Get("/review", s.handleReview)
+	r.Get("/api/review/cues", s.handleGetCues)
+	r.Patch("/api/review/cue", s.handlePatchCue)
+	r.Post("/api/review/retranslate", s.handleRetranslate)
 
 	// Assets statiques embarqués
 	staticSub, err := fs.Sub(staticFS, "web/static")
@@ -192,6 +243,11 @@ func (s *Server) Run(ctx context.Context) error {
 		return err
 	case <-ctx.Done():
 		slog.Info("server: arrêt gracieux…")
+		// Flush SIGTERM : synchrone, non négociable (docker restart ne doit pas perdre les edits).
+		if s.flushMgr != nil {
+			s.flushMgr.FlushAllSync()
+			s.flushMgr.Stop()
+		}
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := s.srv.Shutdown(shutCtx); err != nil {

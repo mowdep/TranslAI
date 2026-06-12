@@ -1,0 +1,119 @@
+{{define "content"}}
+<h1>Editeur d'alignement</h1>
+
+{{if and .JobID .File}}
+<div class="card">
+  <div class="review-toolbar">
+    <span class="review-info">Job: <code>{{.JobID}}</code> — Fichier: <code>{{.File}}</code></span>
+    <div class="review-nav">
+      <button id="prev-flag" onclick="navigateFlag(-1)">&#8593; Flag precedent</button>
+      <button id="next-flag" onclick="navigateFlag(1)">Flag suivant &#8595;</button>
+    </div>
+    <a href="/api/download?job_id={{.JobID}}&file={{.File}}" class="btn btn-sm">Telecharger le SRT corrige</a>
+  </div>
+</div>
+
+<div class="card">
+  <table class="review-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Timecode</th>
+        <th>Source</th>
+        <th>Cible (editable)</th>
+        <th>Flags</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="review-tbody">
+      {{range .Cues}}
+      <tr id="row-{{.Index}}" {{if .Flags}}class="flagged"{{end}}>
+        <td class="idx">{{.Index}}</td>
+        <td class="timecode">—</td>
+        <td class="source">{{range .SourceLines}}<div>{{.}}</div>{{end}}</td>
+        <td class="target">
+          <textarea
+            id="cue-{{.Index}}"
+            name="lines"
+            rows="{{len .TargetLines}}"
+            hx-patch="/api/review/cue"
+            hx-trigger="blur"
+            hx-vals='js:{job: getJobID(), file: getFileID(), index: {{.Index}}, lines: getCueLines({{.Index}})}'
+            hx-target="this"
+            hx-swap="none"
+          >{{range $i, $l := .TargetLines}}{{if $i}}
+{{end}}{{$l}}{{end}}</textarea>
+        </td>
+        <td class="flags" id="flags-{{.Index}}">
+          {{range .Flags}}<span class="flag flag-{{.}}" title="{{.}}">{{flagIcon .}}</span>{{end}}
+        </td>
+        <td class="actions">
+          <button
+            hx-post="/api/review/retranslate"
+            hx-vals='{"job":"{{$.JobID}}","file":"{{$.File}}","index":{{.Index}}}'
+            hx-target="this"
+            hx-swap="none"
+            hx-on:htmx:after-request="refreshCue(event, {{.Index}})"
+            class="btn btn-sm"
+            title="Retraduire cette cue"
+          >&#8635;</button>
+        </td>
+      </tr>
+      {{else}}
+      <tr><td colspan="6" class="empty">Aucune cue disponible.</td></tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+
+<script>
+function getJobID() { return {{.JobID | js}}; }
+function getFileID() { return {{.File | js}}; }
+
+function getCueLines(idx) {
+  var ta = document.getElementById('cue-' + idx);
+  if (!ta) return [];
+  return ta.value.split('\n');
+}
+
+// refreshCue met a jour le textarea et les flags apres retranslate.
+function refreshCue(event, idx) {
+  var xhr = event.detail.xhr;
+  if (!xhr || xhr.status !== 200) return;
+  try {
+    var data = JSON.parse(xhr.responseText);
+    var ta = document.getElementById('cue-' + idx);
+    if (ta && data.TargetLines) {
+      ta.value = data.TargetLines.join('\n');
+    }
+  } catch(e) {}
+}
+
+// Navigation flag-a-flag.
+var flaggedRows = [];
+var flagIdx = -1;
+
+function buildFlagIndex() {
+  flaggedRows = Array.from(document.querySelectorAll('tr.flagged'));
+}
+
+function navigateFlag(dir) {
+  if (flaggedRows.length === 0) buildFlagIndex();
+  if (flaggedRows.length === 0) return;
+  flagIdx = (flagIdx + dir + flaggedRows.length) % flaggedRows.length;
+  flaggedRows[flagIdx].scrollIntoView({behavior: 'smooth', block: 'center'});
+  var ta = flaggedRows[flagIdx].querySelector('textarea');
+  if (ta) ta.focus();
+}
+
+document.addEventListener('DOMContentLoaded', buildFlagIndex);
+// Rebuildindex apres chaque swap HTMX.
+document.addEventListener('htmx:afterSwap', buildFlagIndex);
+</script>
+{{else}}
+<div class="card">
+  <p>Selectionnez un job et un fichier pour editer l'alignement.</p>
+  <p>Parametres URL : <code>/review?job=JOB_ID&amp;file=FILENAME</code></p>
+</div>
+{{end}}
+{{end}}

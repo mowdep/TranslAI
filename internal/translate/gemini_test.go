@@ -37,12 +37,12 @@ func echoGeminiResponse(prompt string) string {
 }
 
 func TestGeminiRequestShape(t *testing.T) {
-	var gotPath, gotQuery string
+	var gotPath, gotAPIKeyHeader string
 	var gotBody geminiRequest
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
-		gotQuery = r.URL.Query().Get("key")
+		gotAPIKeyHeader = r.Header.Get("x-goog-api-key")
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Fatalf("décodage corps: %v", err)
 		}
@@ -73,15 +73,15 @@ func TestGeminiRequestShape(t *testing.T) {
 		t.Fatalf("Translate: %v", err)
 	}
 
-	// Vérifier le path et la query key
+	// Vérifier le path et la clé API dans le header (pas dans l'URL)
 	if !strings.Contains(gotPath, "gemini-1.5-flash") {
 		t.Errorf("path = %q, devrait contenir le modèle", gotPath)
 	}
 	if !strings.Contains(gotPath, "generateContent") {
 		t.Errorf("path = %q, devrait contenir generateContent", gotPath)
 	}
-	if gotQuery != "AIza-secret" {
-		t.Errorf("query key = %q, attendu %q", gotQuery, "AIza-secret")
+	if gotAPIKeyHeader != "AIza-secret" {
+		t.Errorf("x-goog-api-key header = %q, attendu %q", gotAPIKeyHeader, "AIza-secret")
 	}
 
 	// Vérifier le body

@@ -1,7 +1,7 @@
 # Multi-stage : base (toolchain) → test (gate) → build (binaire) → runtime (distroless).
 
 ############################ base : toolchain Go + lint ############################
-FROM golang:1.23-alpine AS base
+FROM golang:1.23.10-alpine3.21 AS base
 RUN apk add --no-cache git make bash
 # golangci-lint v1.64 = compatible avec le format de .golangci.yml (v1).
 RUN go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
@@ -23,12 +23,13 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
       ./cmd/translai
 
 ############################ runtime : image finale minimale ############################
-FROM gcr.io/distroless/static-debian12
+FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /translai /translai
 
 # /config persiste config.yaml et les snapshots de jobs (WorkDir).
 VOLUME ["/config"]
 EXPOSE 8080
 
+USER nonroot:nonroot
 ENTRYPOINT ["/translai"]
 CMD ["web", "--addr", ":8080", "--config", "/config/config.yaml"]

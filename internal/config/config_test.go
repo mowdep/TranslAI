@@ -219,8 +219,9 @@ func TestStoreMasking(t *testing.T) {
 		t.Errorf("APIKey vide devrait rester vide, got %q", ollama.APIKey)
 	}
 	openai := got.Providers["openai"]
-	if openai.APIKey != "***" {
-		t.Errorf("APIKey non vide devrait être ***, got %q", openai.APIKey)
+	// "sk-secret" → "sk-***ret" (3 premiers + *** + 3 derniers)
+	if openai.APIKey != "sk-***ret" {
+		t.Errorf("APIKey masquée attendue %q, got %q", "sk-***ret", openai.APIKey)
 	}
 }
 

@@ -51,7 +51,15 @@ func (s *Store) Resolve(providerOverride, modelOverride string) (string, Provide
 	return providerName, p
 }
 
-// masked retourne une copie de la Config avec les APIKey non vides remplacées par "***".
+// maskAPIKey conserve les 3 premiers et 3 derniers caractères, remplace le reste par "***".
+func maskAPIKey(key string) string {
+	if len(key) <= 6 {
+		return "***"
+	}
+	return key[:3] + "***" + key[len(key)-3:]
+}
+
+// masked retourne une copie de la Config avec les APIKey masquées (3 premiers + 3 derniers).
 func masked(c *Config) Config {
 	cp := Config{
 		ActiveProvider: c.ActiveProvider,
@@ -63,7 +71,7 @@ func masked(c *Config) Config {
 		cp.Providers = make(map[string]ProviderConfig, len(c.Providers))
 		for k, p := range c.Providers {
 			if p.APIKey != "" {
-				p.APIKey = "***"
+				p.APIKey = maskAPIKey(p.APIKey)
 			}
 			cp.Providers[k] = p
 		}

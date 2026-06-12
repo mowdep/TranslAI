@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // OpenAICompat parle l'API OpenAI-compatible /v1/chat/completions, ce qui couvre
@@ -30,7 +31,7 @@ func NewOpenAICompat(name, baseURL, model, apiKey string, temperature float64) *
 		model:       model,
 		apiKey:      apiKey,
 		temperature: temperature,
-		client:      http.DefaultClient,
+		client:      &http.Client{Timeout: 5 * time.Minute},
 	}
 }
 

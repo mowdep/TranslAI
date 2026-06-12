@@ -4,13 +4,17 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gabrielfareau/translai/internal/config"
@@ -19,6 +23,41 @@ import (
 	"github.com/gabrielfareau/translai/internal/srt"
 	"github.com/gabrielfareau/translai/internal/translate"
 )
+
+const maxFilesPerJob = 20
+
+// validLangCodes est la liste blanche des codes langue acceptés.
+var validLangCodes = map[string]bool{
+	"auto": true,
+	"en": true, "fr": true, "es": true, "de": true,
+	"it": true, "pt": true, "nl": true, "zh": true,
+	"ja": true, "ko": true, "ar": true, "ru": true,
+	"pl": true, "sv": true, "da": true, "fi": true,
+	"no": true, "tr": true, "cs": true, "hu": true,
+}
+
+func isValidLang(s string) bool { return validLangCodes[s] }
+
+// newJobID génère un identifiant opaque de 128 bits via crypto/rand.
+func newJobID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano(), 36)
+	}
+	return hex.EncodeToString(b)
+}
+
+// safeFilename retourne le composant terminal du nom de fichier,
+// sans caractères pouvant injecter des en-têtes HTTP.
+func safeFilename(name string) string {
+	base := filepath.Base(name)
+	return strings.Map(func(r rune) rune {
+		if r == '"' || r == '\r' || r == '\n' || r == '\\' || r == 0 {
+			return '_'
+		}
+		return r
+	}, base)
+}
 
 // handleDetect reçoit un fichier SRT, détecte sa langue et renvoie {"detected_lang":"xx"}.
 // POST /api/detect
@@ -66,18 +105,34 @@ func (s *Server) handleConvert(w http.ResponseWriter, r *http.Request) {
 	}
 
 	target := r.FormValue("target")
-	if target == "" {
-		http.Error(w, "'target' requis", http.StatusBadRequest)
+	if !isValidLang(target) {
+		http.Error(w, "paramètre 'target' invalide", http.StatusBadRequest)
 		return
 	}
 	source := r.FormValue("source")
 	if source == "" {
 		source = "auto"
 	}
+	if !isValidLang(source) {
+		http.Error(w, "paramètre 'source' invalide", http.StatusBadRequest)
+		return
+	}
 
 	files := r.MultipartForm.File["files"]
 	if len(files) == 0 {
 		http.Error(w, "aucun fichier 'files' fourni", http.StatusBadRequest)
+		return
+	}
+	if len(files) > maxFilesPerJob {
+		http.Error(w, fmt.Sprintf("maximum %d fichiers par job", maxFilesPerJob), http.StatusBadRequest)
+		return
+	}
+
+	// Acquérir le sémaphore (max jobs concurrents).
+	select {
+	case s.jobSem <- struct{}{}:
+	default:
+		http.Error(w, "serveur occupé, réessayez dans quelques instants", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -86,29 +141,30 @@ func (s *Server) handleConvert(w http.ResponseWriter, r *http.Request) {
 	for _, fh := range files {
 		f, err := fh.Open()
 		if err != nil {
+			<-s.jobSem
 			http.Error(w, "ouverture fichier: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 		data, err := io.ReadAll(io.LimitReader(f, 10<<20))
 		_ = f.Close()
 		if err != nil {
+			<-s.jobSem
 			http.Error(w, "lecture fichier: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		uploads = append(uploads, uploadedFile{name: fh.Filename, data: data})
+		uploads = append(uploads, uploadedFile{name: safeFilename(fh.Filename), data: data})
 	}
 
-	// Créer le job et le stocker.
-	jobID := fmt.Sprintf("%d", time.Now().UnixNano())
-	job := &JobResult{ID: jobID}
+	jobID := newJobID()
+	job := &JobResult{ID: jobID, createdAt: time.Now()}
 	s.jobs.Set(jobID, job)
 
-	// Résoudre le provider (clé API intacte via Resolve).
 	_, pcfg := s.cfg.Resolve("", "")
 	cfg := s.cfg.Get()
 	batchSize := cfg.BatchSize
 
 	go func() {
+		defer func() { <-s.jobSem }()
 		for _, u := range uploads {
 			fr := doTranslateFile(context.Background(), u.name, u.data, source, target, batchSize, pcfg)
 			job.addFile(fr)
@@ -154,11 +210,6 @@ func doTranslateFile(ctx context.Context, name string, data []byte, source, targ
 }
 
 // handleConvertStream stream la progression SSE d'un job (GET /api/convert/stream?job_id=).
-//
-// Choix de conception : si le client se déconnecte (ctx.Done()), cette goroutine
-// de streaming s'arrête, mais le job en cours dans sa goroutine propre continue
-// jusqu'à complétion afin que le résultat reste disponible en mémoire pour un
-// éventuel téléchargement direct.
 func (s *Server) handleConvertStream(w http.ResponseWriter, r *http.Request) {
 	jobID := r.URL.Query().Get("job_id")
 	if jobID == "" {
@@ -219,7 +270,6 @@ func (s *Server) handleConvertStream(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Progress synthétique.
 		_ = WriteSSE(w, SSEEvent{
 			Type:  "progress",
 			Stage: "processing",
@@ -227,8 +277,6 @@ func (s *Server) handleConvertStream(w http.ResponseWriter, r *http.Request) {
 			Total: len(files),
 		})
 
-		// On arrête le stream dès qu'au moins un fichier est disponible
-		// (le client récupère les fichiers un par un via SSE result).
 		if len(files) > 0 {
 			return
 		}
@@ -257,7 +305,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			w.Header().Set("Content-Type", "application/x-subrip")
-			w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, fr.Name))
+			w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, safeFilename(fr.Name)))
 			w.Header().Set("Content-Length", strconv.Itoa(len(fr.SRTOut)))
 			_, _ = w.Write(fr.SRTOut)
 			return
@@ -286,7 +334,7 @@ func (s *Server) handleDownloadAll(w http.ResponseWriter, r *http.Request) {
 		if fr.Err != "" || len(fr.SRTOut) == 0 {
 			continue
 		}
-		f, err := zw.Create(fr.Name)
+		f, err := zw.Create(safeFilename(fr.Name))
 		if err != nil {
 			slog.Error("handleDownloadAll: zip create", "file", fr.Name, "err", err)
 			continue

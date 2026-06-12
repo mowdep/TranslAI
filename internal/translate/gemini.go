@@ -7,13 +7,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/gabrielfareau/translai/internal/config"
 )
 
 const (
-	geminiBaseURL  = "https://generativelanguage.googleapis.com/v1beta/models"
-	geminiMaxTok   = 4096
+	geminiBaseURL = "https://generativelanguage.googleapis.com/v1beta/models"
+	geminiMaxTok  = 4096
 )
 
 // GeminiClient implémente Translator via l'API Google Gemini generateContent.
@@ -36,7 +37,7 @@ func NewGeminiClient(cfg config.ProviderConfig) *GeminiClient {
 		apiKey:      cfg.APIKey,
 		temperature: cfg.Temperature,
 		baseURL:     baseURL,
-		httpClient:  http.DefaultClient,
+		httpClient:  &http.Client{Timeout: 5 * time.Minute},
 	}
 }
 
@@ -45,8 +46,8 @@ func (c *GeminiClient) Name() string { return "gemini" }
 // types internes pour l'API Gemini generateContent
 
 type geminiRequest struct {
-	Contents         []geminiContent      `json:"contents"`
-	GenerationConfig geminiGenConfig      `json:"generationConfig"`
+	Contents         []geminiContent `json:"contents"`
+	GenerationConfig geminiGenConfig `json:"generationConfig"`
 }
 
 type geminiContent struct {
@@ -94,12 +95,14 @@ func (c *GeminiClient) Translate(ctx context.Context, req Request) ([]string, er
 		return nil, fmt.Errorf("translate(gemini): encodage requête: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/%s:generateContent?key=%s", c.baseURL, c.model, c.apiKey)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body)) //nolint:gosec // url construite depuis la config provider
+	// La clé passe dans le header x-goog-api-key, jamais dans l'URL (évite la fuite dans *url.Error).
+	url := fmt.Sprintf("%s/%s:generateContent", c.baseURL, c.model) //nolint:gosec
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("translate(gemini): construction requête: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("x-goog-api-key", c.apiKey)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -117,7 +120,7 @@ func (c *GeminiClient) Translate(ctx context.Context, req Request) ([]string, er
 		if jsonErr := json.Unmarshal(data, &errResp); jsonErr == nil && errResp.Error != nil {
 			return nil, fmt.Errorf("translate(gemini): statut %d: %s", resp.StatusCode, errResp.Error.Message)
 		}
-		return nil, fmt.Errorf("translate(gemini): statut %d: %s", resp.StatusCode, string(data))
+		return nil, fmt.Errorf("translate(gemini): statut %d", resp.StatusCode)
 	}
 
 	var gr geminiResponse

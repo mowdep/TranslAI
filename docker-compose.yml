@@ -14,7 +14,7 @@ services:
     restart: unless-stopped
 
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.6.8
     volumes:
       - ollama_data:/root/.ollama
     ports:

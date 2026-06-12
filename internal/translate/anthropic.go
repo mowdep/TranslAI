@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/gabrielfareau/translai/internal/config"
 )
@@ -37,7 +38,7 @@ func NewAnthropicClient(cfg config.ProviderConfig) *AnthropicClient {
 		apiKey:      cfg.APIKey,
 		temperature: cfg.Temperature,
 		endpoint:    endpoint,
-		httpClient:  http.DefaultClient,
+		httpClient:  &http.Client{Timeout: 5 * time.Minute},
 	}
 }
 

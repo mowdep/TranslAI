@@ -324,8 +324,9 @@ func TestGetConfig(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	if p, ok := result.Providers["ollama"]; ok {
-		if p.APIKey != "***" {
-			t.Errorf("APIKey non masquée: %q", p.APIKey)
+		// "secret123" → "sec***123" (3 premiers + *** + 3 derniers)
+		if p.APIKey != "sec***123" {
+			t.Errorf("APIKey masquée attendue %q, got %q", "sec***123", p.APIKey)
 		}
 	} else {
 		t.Error("provider 'ollama' absent de la réponse")

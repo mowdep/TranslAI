@@ -293,7 +293,7 @@ func (s *memReviewStore) Flush(jobID, workDir string) error {
 		if err != nil {
 			return fmt.Errorf("review: sidecar marshal: %w", err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "sidecar.json"), scData, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "sidecar.json"), scData, 0o600); err != nil {
 			return fmt.Errorf("review: sidecar write: %w", err)
 		}
 

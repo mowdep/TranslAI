@@ -28,11 +28,16 @@ var staticFS embed.FS
 //go:embed web/templates
 var templatesFS embed.FS
 
+const (
+	maxConcurrentJobs = 10
+	jobTTL            = time.Hour
+)
+
 // JobStore stocke les résultats de conversion en mémoire (thread-safe).
-// La persistance disque (write-behind) est réservée à la Phase 8.5.
 type JobStore interface {
 	Set(id string, job *JobResult)
 	Get(id string) (*JobResult, bool)
+	Purge(olderThan time.Duration)
 }
 
 // memJobStore est l'implémentation in-memory de JobStore.
@@ -58,11 +63,24 @@ func (s *memJobStore) Get(id string) (*JobResult, bool) {
 	return j, ok
 }
 
+// Purge supprime les jobs dont createdAt est plus vieux que olderThan.
+func (s *memJobStore) Purge(olderThan time.Duration) {
+	cutoff := time.Now().Add(-olderThan)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, j := range s.jobs {
+		if j.createdAt.Before(cutoff) {
+			delete(s.jobs, id)
+		}
+	}
+}
+
 // JobResult contient les résultats d'une conversion.
 type JobResult struct {
-	ID    string
-	Files []FileResult
-	mu    sync.RWMutex
+	ID        string
+	Files     []FileResult
+	createdAt time.Time
+	mu        sync.RWMutex
 }
 
 // addFile ajoute un FileResult de façon thread-safe.
@@ -84,8 +102,8 @@ func (j *JobResult) getFiles() []FileResult {
 // FileResult contient le résultat de la traduction d'un fichier.
 type FileResult struct {
 	Name   string
-	SRTOut []byte // SRT traduit sérialisé
-	Err    string // vide si succès
+	SRTOut []byte
+	Err    string
 }
 
 // Server est le serveur HTTP de translai.
@@ -98,14 +116,14 @@ type Server struct {
 	workDir     string
 	addr        string
 	srv         *http.Server
-	tmpl        *template.Template // template set pour la page convert (/)
-	tmplAdmin   *template.Template // template set pour la page admin (/admin)
-	tmplReview  *template.Template // template set pour la page review (/review)
+	tmpl        *template.Template
+	tmplAdmin   *template.Template
+	tmplReview  *template.Template
 	cfgPath     string
+	jobSem      chan struct{} // sémaphore : max jobs concurrents
 }
 
 // New crée un Server prêt à démarrer.
-// cfgPath est le chemin vers config.yaml utilisé pour sauvegarder via POST /api/config.
 func New(addr string, store *config.Store, cfgPath string) *Server {
 	return NewWithWorkDir(addr, store, cfgPath, "")
 }
@@ -126,6 +144,7 @@ func NewWithWorkDir(addr string, store *config.Store, cfgPath, workDir string) *
 		flushMgr:    fm,
 		workDir:     workDir,
 		cfgPath:     cfgPath,
+		jobSem:      make(chan struct{}, maxConcurrentJobs),
 	}
 	s.loadTemplates()
 	s.mountRoutes()
@@ -159,20 +178,15 @@ var reviewFuncMap = template.FuncMap{
 }
 
 // loadTemplates parse les templates embarqués.
-// Chaque page est un template set séparé pour éviter les collisions sur le
-// bloc "content" (convert.html et admin.html définissent tous deux "content").
 func (s *Server) loadTemplates() {
-	// Template set convert : layout + convert.html
 	convert := template.Must(template.New("layout.html").ParseFS(templatesFS,
 		"web/templates/layout.html",
 		"web/templates/convert.html",
 	))
-	// Template set admin : layout + admin.html
 	admin := template.Must(template.New("layout.html").ParseFS(templatesFS,
 		"web/templates/layout.html",
 		"web/templates/admin.html",
 	))
-	// Template set review : layout + review.html (avec FuncMap)
 	review := template.Must(template.New("layout.html").Funcs(reviewFuncMap).ParseFS(templatesFS,
 		"web/templates/layout.html",
 		"web/templates/review.html",
@@ -182,12 +196,24 @@ func (s *Server) loadTemplates() {
 	s.tmplReview = review
 }
 
+// securityHeaders ajoute les en-têtes de sécurité HTTP sur toutes les réponses.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'")
+		next.ServeHTTP(w, r)
+	})
+}
+
 // mountRoutes configure le router chi.
 func (s *Server) mountRoutes() {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
+	r.Use(securityHeaders)
 
 	// Pages
 	r.Get("/", s.handleIndex)
@@ -205,7 +231,7 @@ func (s *Server) mountRoutes() {
 	r.Get("/api/download", s.handleDownload)
 	r.Get("/api/download/all", s.handleDownloadAll)
 
-	// Review (editeur d'alignement)
+	// Review
 	r.Get("/review", s.handleReview)
 	r.Get("/api/review/cues", s.handleGetCues)
 	r.Patch("/api/review/cue", s.handlePatchCue)
@@ -222,12 +248,29 @@ func (s *Server) mountRoutes() {
 }
 
 // Run démarre le serveur HTTP et bloque jusqu'à ctx.Done().
-// Effectue un graceful shutdown avec timeout de 5 s.
 func (s *Server) Run(ctx context.Context) error {
 	s.srv = &http.Server{
-		Addr:    s.addr,
-		Handler: s.router,
+		Addr:        s.addr,
+		Handler:     s.router,
+		ReadTimeout: 10 * time.Second,
+		// WriteTimeout désactivé au niveau serveur : les SSE nécessitent
+		// des réponses longues ; le timeout est géré par ctx des handlers.
+		IdleTimeout: 60 * time.Second,
 	}
+
+	// Purge périodique des jobs expirés (toutes les 15 min).
+	go func() {
+		t := time.NewTicker(15 * time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				s.jobs.Purge(jobTTL)
+			}
+		}
+	}()
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -243,7 +286,6 @@ func (s *Server) Run(ctx context.Context) error {
 		return err
 	case <-ctx.Done():
 		slog.Info("server: arrêt gracieux…")
-		// Flush SIGTERM : synchrone, non négociable (docker restart ne doit pas perdre les edits).
 		if s.flushMgr != nil {
 			s.flushMgr.FlushAllSync()
 			s.flushMgr.Stop()

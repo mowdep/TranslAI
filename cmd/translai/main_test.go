@@ -153,3 +153,151 @@ func copyFile(t *testing.T, src, dst string) {
 		t.Fatalf("write %s: %v", dst, err)
 	}
 }
+
+// TestBatchDir vérifie que le mode dossier traduit tous les fichiers,
+// isole les erreurs, et renvoie un exit != 0 si >= 1 fichier échoue.
+func TestBatchDir(t *testing.T) {
+	// Le mockLLM traduit tous les fichiers normalement.
+	srv := mockLLM(t)
+	defer srv.Close()
+
+	// Préparer un dossier temporaire avec 3 fixtures.
+	dir := t.TempDir()
+	for _, fixture := range []string{"en.srt", "fr.srt", "es.srt"} {
+		copyFile(t, "../../testdata/"+fixture, filepath.Join(dir, fixture))
+	}
+
+	outDir := t.TempDir()
+	f := translateFlags{
+		input:       dir,
+		outDir:      outDir,
+		source:      "auto",
+		target:      "fr",
+		model:       "mock",
+		baseURL:     srv.URL + "/v1",
+		temperature: 0.2,
+		batchSize:   10,
+		concurrency: 2,
+	}
+
+	err := runTranslate(context.Background(), f)
+	if err != nil {
+		t.Fatalf("batch dir: erreur inattendue: %v", err)
+	}
+
+	// Vérifier que les 3 fichiers traduits ont été créés.
+	for _, fixture := range []string{"en.fr.srt", "fr.fr.srt", "es.fr.srt"} {
+		out := filepath.Join(outDir, fixture)
+		if _, statErr := os.Stat(out); statErr != nil {
+			t.Errorf("fichier traduit manquant: %s", out)
+		}
+	}
+}
+
+// TestBatchGlob vérifie que le glob *.srt fonctionne correctement.
+func TestBatchGlob(t *testing.T) {
+	srv := mockLLM(t)
+	defer srv.Close()
+
+	dir := t.TempDir()
+	for _, fixture := range []string{"en.srt", "fr.srt"} {
+		copyFile(t, "../../testdata/"+fixture, filepath.Join(dir, fixture))
+	}
+
+	outDir := t.TempDir()
+	f := translateFlags{
+		input:       filepath.Join(dir, "*.srt"),
+		outDir:      outDir,
+		source:      "auto",
+		target:      "es",
+		model:       "mock",
+		baseURL:     srv.URL + "/v1",
+		temperature: 0.2,
+		batchSize:   10,
+		concurrency: 2,
+	}
+
+	if err := runTranslate(context.Background(), f); err != nil {
+		t.Fatalf("batch glob: %v", err)
+	}
+
+	for _, fixture := range []string{"en.es.srt", "fr.es.srt"} {
+		out := filepath.Join(outDir, fixture)
+		if _, statErr := os.Stat(out); statErr != nil {
+			t.Errorf("fichier traduit manquant: %s", out)
+		}
+	}
+}
+
+// TestBatchPartialFailure vérifie qu'un fichier KO n'arrête pas les autres
+// et que le code retour est != 0.
+func TestBatchPartialFailure(t *testing.T) {
+	// Serveur qui échoue systématiquement pour es.srt (contenu avec "Hola").
+	re := regexp.MustCompile(`(?m)^\s*\[(\d+)\]\s?(.*)$`)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Messages []struct{ Role, Content string } `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		var user string
+		for _, m := range req.Messages {
+			if m.Role == "user" {
+				user = m.Content
+			}
+		}
+		// Échouer pour tout batch contenant du contenu espagnol (es.srt).
+		if strings.Contains(user, "Hola") || strings.Contains(user, "Esta es una") || strings.Contains(user, "clima") {
+			http.Error(w, "simulated failure", http.StatusInternalServerError)
+			return
+		}
+		var b strings.Builder
+		for _, m := range re.FindAllStringSubmatch(user, -1) {
+			b.WriteString("[" + m[1] + "] FR:" + m[2] + "\n")
+		}
+		resp := map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"role": "assistant", "content": b.String()}},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	fixtures := []string{"en.srt", "fr.srt", "es.srt"}
+	for _, fixture := range fixtures {
+		copyFile(t, "../../testdata/"+fixture, filepath.Join(dir, fixture))
+	}
+
+	outDir := t.TempDir()
+	f := translateFlags{
+		input:       dir,
+		outDir:      outDir,
+		source:      "auto",
+		target:      "fr",
+		model:       "mock",
+		baseURL:     srv.URL + "/v1",
+		temperature: 0.2,
+		batchSize:   10,
+		concurrency: 2,
+	}
+
+	err := runTranslate(context.Background(), f)
+	if err == nil {
+		t.Fatal("attendu erreur batch partielle, got nil")
+	}
+	if !strings.Contains(err.Error(), "1 fichier") {
+		t.Errorf("message d'erreur inattendu: %v", err)
+	}
+
+	// 2 fichiers sur 3 doivent avoir été traduits (en + fr), es.srt KO.
+	translated := 0
+	for _, fixture := range []string{"en.fr.srt", "fr.fr.srt", "es.fr.srt"} {
+		if _, statErr := os.Stat(filepath.Join(outDir, fixture)); statErr == nil {
+			translated++
+		}
+	}
+	if translated != 2 {
+		t.Errorf("attendu 2 fichiers traduits, got %d", translated)
+	}
+}

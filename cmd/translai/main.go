@@ -6,11 +6,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
 
@@ -63,7 +65,7 @@ func newTranslateCmd() *cobra.Command {
 	var f translateFlags
 	cmd := &cobra.Command{
 		Use:   "translate",
-		Short: "Traduit un fichier .srt (le mode batch arrive en Phase 6)",
+		Short: "Traduit un ou plusieurs fichiers .srt (fichier, dossier ou glob)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if f.verbose {
 				slog.SetLogLoggerLevel(slog.LevelDebug)
@@ -101,10 +103,107 @@ func runTranslate(ctx context.Context, f translateFlags) error {
 		return err
 	}
 
-	if info, statErr := os.Stat(f.input); statErr == nil && info.IsDir() {
-		return fmt.Errorf("traduction par dossier non disponible (mode batch = Phase 6)")
+	// Mode batch : dossier ou glob (plusieurs fichiers).
+	files, isBatch, err := resolveInputs(f.input)
+	if err != nil {
+		return err
+	}
+	if isBatch {
+		return runBatch(ctx, files, f, tr)
 	}
 	return translateFile(ctx, f.input, outputPath(f), f, tr)
+}
+
+// resolveInputs retourne la liste des fichiers .srt correspondant à l'entrée.
+// isBatch = true si l'entrée est un dossier ou un glob qui correspond à plusieurs fichiers.
+func resolveInputs(input string) (files []string, isBatch bool, err error) {
+	// 1. Dossier ?
+	if info, statErr := os.Stat(input); statErr == nil && info.IsDir() {
+		matches, globErr := filepath.Glob(filepath.Join(input, "*.srt"))
+		if globErr != nil {
+			return nil, false, fmt.Errorf("glob dossier %s: %w", input, globErr)
+		}
+		return matches, true, nil
+	}
+	// 2. Glob explicite (contient *, ?, [) ?
+	if strings.ContainsAny(input, "*?[") {
+		matches, globErr := filepath.Glob(input)
+		if globErr != nil {
+			return nil, false, fmt.Errorf("glob %s: %w", input, globErr)
+		}
+		return matches, true, nil
+	}
+	// 3. Fichier unique.
+	return []string{input}, false, nil
+}
+
+// runBatch traduit une liste de fichiers en parallèle (pool de Concurrency workers).
+// Un fichier KO n'arrête pas les autres ; code retour != 0 si >= 1 échec.
+func runBatch(ctx context.Context, files []string, f translateFlags, tr translate.Translator) error {
+	if len(files) == 0 {
+		return fmt.Errorf("aucun fichier .srt trouvé pour %q", f.input)
+	}
+
+	concurrency := f.concurrency
+	if concurrency < 1 {
+		concurrency = 4
+	}
+
+	type result struct {
+		file string
+		err  error
+	}
+
+	work := make(chan string, len(files))
+	for _, file := range files {
+		work <- file
+	}
+	close(work)
+
+	results := make(chan result, len(files))
+	var wg sync.WaitGroup
+
+	for range concurrency {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for file := range work {
+				out := batchOutputPath(file, f)
+				err := translateFile(ctx, file, out, f, tr)
+				if err != nil {
+					slog.Error("batch: échec fichier", "file", file, "err", err)
+				} else {
+					slog.Info("batch: fichier traduit", "file", file, "out", out)
+				}
+				results <- result{file: file, err: err}
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(results)
+
+	var errs []error
+	for r := range results {
+		if r.err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", r.file, r.err))
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("batch: %d fichier(s) en échec:\n%w", len(errs), errors.Join(errs...))
+	}
+	return nil
+}
+
+// batchOutputPath calcule le chemin de sortie d'un fichier dans le mode batch.
+func batchOutputPath(file string, f translateFlags) string {
+	base := filepath.Base(file)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext) + "." + f.target + ext
+	if f.outDir != "" {
+		return filepath.Join(f.outDir, name)
+	}
+	return filepath.Join(filepath.Dir(file), name)
 }
 
 func buildTranslator(f translateFlags) (translate.Translator, error) {

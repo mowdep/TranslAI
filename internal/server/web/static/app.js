@@ -23,7 +23,6 @@
 
   if (!dropZone) return; // not on convert page
 
-  dropZone.addEventListener("click", () => fileInput && fileInput.click());
   dropZone.addEventListener("dragover", (e) => {
     e.preventDefault();
     dropZone.classList.add("drag-over");
@@ -59,7 +58,7 @@
     selectedFiles.forEach((f, i) => {
       const li = document.createElement("li");
       li.innerHTML = `<span>${f.name}</span><span class="badge">${formatBytes(f.size)}</span>
-        <button class="btn btn-ghost btn-sm" data-idx="${i}" title="Retirer">&#x2715;</button>`;
+        <button class="btn btn-ghost btn-sm" data-idx="${i}" title="Retirer">✕</button>`;
       li.querySelector("button").addEventListener("click", () => {
         selectedFiles.splice(i, 1);
         renderFileList();
@@ -77,7 +76,7 @@
       const r = await fetch("/api/detect", { method: "POST", body: fd });
       if (r.ok) {
         const data = await r.json();
-        if (data.detected_lang && detectLangEl.querySelector('option[value="' + data.detected_lang + '"]')) {
+        if (data.detected_lang && detectLangEl.querySelector(`option[value="${data.detected_lang}"]`)) {
           detectLangEl.value = data.detected_lang;
         }
       }
@@ -96,9 +95,8 @@
 
   async function startConvert() {
     if (selectedFiles.length === 0) return;
-    var targetEl = document.getElementById("target-lang");
-    const targetLang = targetEl ? targetEl.value : "fr";
-    const sourceLang = detectLangEl ? detectLangEl.value : "auto";
+    const targetLang = document.getElementById("target-lang")?.value || "fr";
+    const sourceLang = detectLangEl?.value || "auto";
 
     const fd = new FormData();
     selectedFiles.forEach((f) => fd.append("files", f));
@@ -106,11 +104,11 @@
     fd.append("source", sourceLang);
 
     convertBtn.disabled = true;
-    if (progressSection) progressSection.hidden = false;
-    if (resultsSection) resultsSection.hidden = true;
+    progressSection.hidden = false;
+    resultsSection.hidden = true;
     fileResults = {};
-    if (progressBar) progressBar.style.width = "0%";
-    if (progressStatus) progressStatus.textContent = "Demarrage...";
+    progressBar.style.width = "0%";
+    progressStatus.textContent = "Démarrage…";
 
     try {
       const r = await fetch("/api/convert", { method: "POST", body: fd });
@@ -124,7 +122,7 @@
       currentJobId = data.job_id;
       openSSE(currentJobId);
     } catch (e) {
-      alert("Erreur reseau: " + e);
+      alert("Erreur réseau: " + e);
       convertBtn.disabled = false;
     }
   }
@@ -133,63 +131,60 @@
     if (eventSource) eventSource.close();
     eventSource = new EventSource("/api/convert/stream?job_id=" + encodeURIComponent(jobId));
 
-    eventSource.addEventListener("progress", function(e) {
+    eventSource.addEventListener("progress", (e) => {
       const d = JSON.parse(e.data);
       const pct = d.Total > 0 ? Math.round((d.Done / d.Total) * 100) : 0;
-      if (progressBar) progressBar.style.width = pct + "%";
-      if (progressStatus) progressStatus.textContent = d.Stage + (d.File ? " - " + d.File : "");
+      progressBar.style.width = pct + "%";
+      progressStatus.textContent = d.Stage + (d.File ? " — " + d.File : "");
     });
 
-    eventSource.addEventListener("result", function(e) {
+    eventSource.addEventListener("result", (e) => {
       const d = JSON.parse(e.data);
       fileResults[d.File] = d;
       renderResults();
     });
 
-    eventSource.addEventListener("error", function(e) {
-      try {
-        const d = JSON.parse(e.data);
-        if (d.File) {
-          fileResults[d.File] = Object.assign({}, d, { isError: true });
-          renderResults();
-        }
-      } catch(_) {}
+    eventSource.addEventListener("error", (e) => {
+      const d = JSON.parse(e.data || "{}");
+      if (d.File) {
+        fileResults[d.File] = { ...d, isError: true };
+        renderResults();
+      }
     });
 
-    eventSource.onerror = function() {
+    eventSource.onerror = () => {
       eventSource.close();
-      if (convertBtn) convertBtn.disabled = false;
-      if (progressBar && progressBar.style.width === "100%") return;
-      if (progressStatus) progressStatus.textContent = "Connexion perdue";
+      convertBtn.disabled = false;
+      if (progressBar.style.width === "100%") return;
+      progressStatus.textContent = "Connexion perdue";
     };
 
-    // Detect completion
-    const checkDone = setInterval(function() {
+    // Detect completion: all files received
+    const checkDone = setInterval(() => {
       if (Object.keys(fileResults).length >= selectedFiles.length) {
         clearInterval(checkDone);
         eventSource.close();
-        if (progressBar) progressBar.style.width = "100%";
-        if (progressStatus) progressStatus.textContent = "Termine";
-        if (convertBtn) convertBtn.disabled = false;
+        progressBar.style.width = "100%";
+        progressStatus.textContent = "Terminé";
+        convertBtn.disabled = false;
       }
     }, 500);
   }
 
   function renderResults() {
     if (!resultsList) return;
-    if (resultsSection) resultsSection.hidden = false;
+    resultsSection.hidden = false;
     resultsList.innerHTML = "";
-    Object.entries(fileResults).forEach(function(entry) {
-      const name = entry[0], d = entry[1];
+    Object.entries(fileResults).forEach(([name, d]) => {
       const row = document.createElement("div");
       row.className = "result-row";
       if (d.Payload) {
-        row.innerHTML = '<span class="filename">' + name + '</span>'
-          + '<span class="status-ok">OK</span>'
-          + '<a class="btn btn-sm btn-ghost" href="/api/download?job_id=' + encodeURIComponent(currentJobId) + '&file=' + encodeURIComponent(name) + '">Telecharger</a>';
+        row.innerHTML = `<span class="filename">${name}</span>
+          <span class="status-ok">OK</span>
+          <a class="btn btn-sm btn-ghost" href="/api/download?job_id=${currentJobId}&file=${encodeURIComponent(name)}">Télécharger</a>`;
       } else {
-        row.innerHTML = '<span class="filename">' + name + '</span>'
-          + '<span class="status-err">' + (d.Stage || "erreur") + '</span>';
+        row.innerHTML = `<span class="filename">${name}</span>
+          <span class="status-err">${d.Stage || "erreur"}</span>`;
       }
       resultsList.appendChild(row);
     });
@@ -200,19 +195,20 @@
   }
 
   if (downloadAllBtn) {
-    downloadAllBtn.addEventListener("click", function(e) {
+    downloadAllBtn.addEventListener("click", (e) => {
       if (!currentJobId) { e.preventDefault(); return; }
       downloadAllBtn.href = "/api/download/all?job_id=" + encodeURIComponent(currentJobId);
     });
   }
 
   // ── Admin — test provider ──────────────────────────────────────────────────
-  document.querySelectorAll(".test-provider-btn").forEach(function(btn) {
-    btn.addEventListener("click", async function() {
+  document.querySelectorAll(".test-provider-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
       const card = btn.closest(".provider-card");
-      const fb = card ? card.querySelector(".test-feedback") : null;
+      const fb = card.querySelector(".test-feedback");
       const providerName = btn.dataset.provider;
-      if (fb) { fb.textContent = "Test en cours..."; fb.className = "feedback"; }
+      fb.textContent = "Test en cours…";
+      fb.className = "feedback";
       try {
         const r = await fetch("/api/test-provider", {
           method: "POST",
@@ -220,17 +216,16 @@
           body: JSON.stringify({ provider: providerName }),
         });
         const data = await r.json();
-        if (fb) {
-          if (r.ok && data.ok) {
-            fb.textContent = "Connexion OK" + (data.message ? " - " + data.message : "");
-            fb.className = "feedback ok";
-          } else {
-            fb.textContent = "Erreur: " + (data.error || r.status);
-            fb.className = "feedback err";
-          }
+        if (r.ok && data.ok) {
+          fb.textContent = "Connexion OK" + (data.message ? " — " + data.message : "");
+          fb.className = "feedback ok";
+        } else {
+          fb.textContent = "Erreur: " + (data.error || r.status);
+          fb.className = "feedback err";
         }
       } catch (e) {
-        if (fb) { fb.textContent = "Erreur reseau: " + e; fb.className = "feedback err"; }
+        fb.textContent = "Erreur réseau: " + e;
+        fb.className = "feedback err";
       }
     });
   });
@@ -238,7 +233,7 @@
   // ── Admin — save config ────────────────────────────────────────────────────
   const configForm = document.getElementById("config-form");
   if (configForm) {
-    configForm.addEventListener("submit", async function(e) {
+    configForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       const fb = document.getElementById("save-feedback");
       const fd = new FormData(configForm);
@@ -249,24 +244,20 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(obj),
         });
-        if (fb) {
-          if (r.ok) {
-            fb.textContent = "Configuration sauvegardee";
-            fb.className = "alert alert-ok";
-          } else {
-            const t = await r.text();
-            fb.textContent = "Erreur: " + t;
-            fb.className = "alert alert-err";
-          }
-          fb.hidden = false;
-          setTimeout(function() { fb.hidden = true; }, 3000);
-        }
-      } catch (err) {
-        if (fb) {
-          fb.textContent = "Erreur reseau: " + err;
+        if (r.ok) {
+          fb.textContent = "Configuration sauvegardée";
+          fb.className = "alert alert-ok";
+        } else {
+          const t = await r.text();
+          fb.textContent = "Erreur: " + t;
           fb.className = "alert alert-err";
-          fb.hidden = false;
         }
+        fb.hidden = false;
+        setTimeout(() => { fb.hidden = true; }, 3000);
+      } catch (err) {
+        fb.textContent = "Erreur réseau: " + err;
+        fb.className = "alert alert-err";
+        fb.hidden = false;
       }
     });
   }
@@ -279,11 +270,11 @@
       concurrency: parseInt(fd.get("concurrency") || "2"),
       providers: {},
     };
-    for (const entry of fd.entries()) {
-      const key = entry[0], val = entry[1];
+    // Parse provider fields: provider[name][field]
+    for (const [key, val] of fd.entries()) {
       const m = key.match(/^provider\[([^\]]+)\]\[([^\]]+)\]$/);
       if (m) {
-        const provName = m[1], field = m[2];
+        const [, provName, field] = m;
         if (!config.providers[provName]) config.providers[provName] = {};
         if (field === "temperature") config.providers[provName][field] = parseFloat(val) || 0.2;
         else config.providers[provName][field] = val;

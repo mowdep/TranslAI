@@ -5,19 +5,122 @@
 
 <form id="config-form" method="post" action="/api/config">
 
+  {{$ollama    := index .Providers "ollama"}}
+  {{$llamacpp  := index .Providers "llamacpp"}}
+  {{$openai    := index .Providers "openai"}}
+  {{$anthropic := index .Providers "anthropic"}}
+
+  <div class="provider-cards-grid">
+
+    <div class="provider-card{{if eq $.ActiveProvider "ollama"}} active{{end}}">
+      <div class="provider-header">
+        <h3>Ollama <span class="provider-tag local">local</span></h3>
+        <button type="button" class="btn btn-ghost btn-sm test-provider-btn" data-provider="ollama">Tester</button>
+        <span class="test-feedback feedback"></span>
+      </div>
+      <input type="hidden" name="provider[ollama][type]" value="openai_compat">
+      <div class="form-grid">
+        <div class="field full">
+          <label>Base URL</label>
+          <input type="url" name="provider[ollama][base_url]" value="{{$ollama.BaseURL}}" placeholder="http://localhost:11434/v1">
+        </div>
+        <div class="field">
+          <label>Modèle</label>
+          <input type="text" name="provider[ollama][model]" value="{{$ollama.Model}}" placeholder="llama3.2">
+        </div>
+        <div class="field">
+          <label>Température</label>
+          <input type="number" name="provider[ollama][temperature]" value="{{$ollama.Temperature}}" step="0.1" min="0" max="2" placeholder="0.2">
+        </div>
+      </div>
+    </div>
+
+    <div class="provider-card{{if eq $.ActiveProvider "llamacpp"}} active{{end}}">
+      <div class="provider-header">
+        <h3>llama.cpp <span class="provider-tag local">local</span></h3>
+        <button type="button" class="btn btn-ghost btn-sm test-provider-btn" data-provider="llamacpp">Tester</button>
+        <span class="test-feedback feedback"></span>
+      </div>
+      <input type="hidden" name="provider[llamacpp][type]" value="openai_compat">
+      <div class="form-grid">
+        <div class="field full">
+          <label>Base URL</label>
+          <input type="url" name="provider[llamacpp][base_url]" value="{{$llamacpp.BaseURL}}" placeholder="http://localhost:8080/v1">
+        </div>
+        <div class="field">
+          <label>Modèle</label>
+          <input type="text" name="provider[llamacpp][model]" value="{{$llamacpp.Model}}" placeholder="mistral-7b">
+        </div>
+        <div class="field">
+          <label>Température</label>
+          <input type="number" name="provider[llamacpp][temperature]" value="{{$llamacpp.Temperature}}" step="0.1" min="0" max="2" placeholder="0.2">
+        </div>
+      </div>
+    </div>
+
+    <div class="provider-card{{if eq $.ActiveProvider "openai"}} active{{end}}">
+      <div class="provider-header">
+        <h3>OpenAI <span class="provider-tag cloud">cloud</span></h3>
+        <button type="button" class="btn btn-ghost btn-sm test-provider-btn" data-provider="openai">Tester</button>
+        <span class="test-feedback feedback"></span>
+      </div>
+      <input type="hidden" name="provider[openai][type]" value="openai_compat">
+      <input type="hidden" name="provider[openai][base_url]" value="https://api.openai.com/v1">
+      <div class="form-grid">
+        <div class="field full">
+          <label>Clé API</label>
+          <input type="password" name="provider[openai][api_key]" value="{{$openai.APIKey}}" placeholder="sk-..." autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Modèle</label>
+          <input type="text" name="provider[openai][model]" value="{{$openai.Model}}" placeholder="gpt-4o-mini">
+        </div>
+        <div class="field">
+          <label>Température</label>
+          <input type="number" name="provider[openai][temperature]" value="{{$openai.Temperature}}" step="0.1" min="0" max="2" placeholder="0.2">
+        </div>
+      </div>
+    </div>
+
+    <div class="provider-card{{if eq $.ActiveProvider "anthropic"}} active{{end}}">
+      <div class="provider-header">
+        <h3>Anthropic <span class="provider-tag cloud">cloud</span></h3>
+        <button type="button" class="btn btn-ghost btn-sm test-provider-btn" data-provider="anthropic">Tester</button>
+        <span class="test-feedback feedback"></span>
+      </div>
+      <input type="hidden" name="provider[anthropic][type]" value="anthropic">
+      <div class="form-grid">
+        <div class="field full">
+          <label>Clé API</label>
+          <input type="password" name="provider[anthropic][api_key]" value="{{$anthropic.APIKey}}" placeholder="sk-ant-..." autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Modèle</label>
+          <input type="text" name="provider[anthropic][model]" value="{{$anthropic.Model}}" placeholder="claude-haiku-4-5-20251001">
+        </div>
+        <div class="field">
+          <label>Température</label>
+          <input type="number" name="provider[anthropic][temperature]" value="{{$anthropic.Temperature}}" step="0.1" min="0" max="2" placeholder="0.2">
+        </div>
+      </div>
+    </div>
+
+  </div>
+
   <div class="card">
-    <h2>Parametres globaux</h2>
+    <h2>Paramètres globaux</h2>
     <div class="global-fields">
       <div class="field">
         <label for="active_provider">Provider actif</label>
         <select id="active_provider" name="active_provider">
-          {{range $name, $p := .Providers}}
-          <option value="{{$name}}"{{if eq $name $.ActiveProvider}} selected{{end}}>{{$name}}</option>
-          {{end}}
+          <option value="ollama"{{if eq .ActiveProvider "ollama"}} selected{{end}}>Ollama</option>
+          <option value="llamacpp"{{if eq .ActiveProvider "llamacpp"}} selected{{end}}>llama.cpp</option>
+          <option value="openai"{{if eq .ActiveProvider "openai"}} selected{{end}}>OpenAI</option>
+          <option value="anthropic"{{if eq .ActiveProvider "anthropic"}} selected{{end}}>Anthropic</option>
         </select>
       </div>
       <div class="field">
-        <label for="default_target">Langue cible par defaut</label>
+        <label for="default_target">Langue cible par défaut</label>
         <input type="text" id="default_target" name="default_target" value="{{.DefaultTarget}}" placeholder="fr">
       </div>
       <div class="field">
@@ -30,38 +133,6 @@
       </div>
     </div>
   </div>
-
-  {{range $name, $p := .Providers}}
-  <div class="provider-card{{if eq $name $.ActiveProvider}} active{{end}}">
-    <div class="provider-header">
-      <h3>Provider : {{$name}}</h3>
-      <button type="button" class="btn btn-ghost btn-sm test-provider-btn" data-provider="{{$name}}">Tester la connexion</button>
-      <span class="test-feedback feedback"></span>
-    </div>
-    <div class="form-grid">
-      <div class="field">
-        <label>Type</label>
-        <input type="text" name="provider[{{$name}}][type]" value="{{$p.Type}}" placeholder="openai_compat">
-      </div>
-      <div class="field full">
-        <label>Base URL</label>
-        <input type="url" name="provider[{{$name}}][base_url]" value="{{$p.BaseURL}}" placeholder="http://localhost:11434/v1">
-      </div>
-      <div class="field">
-        <label>Modele</label>
-        <input type="text" name="provider[{{$name}}][model]" value="{{$p.Model}}" placeholder="llama3.2">
-      </div>
-      <div class="field">
-        <label>API Key</label>
-        <input type="password" name="provider[{{$name}}][api_key]" value="{{$p.APIKey}}" placeholder="(vide si local)" autocomplete="off">
-      </div>
-      <div class="field">
-        <label>Temperature</label>
-        <input type="number" name="provider[{{$name}}][temperature]" value="{{$p.Temperature}}" step="0.1" min="0" max="2">
-      </div>
-    </div>
-  </div>
-  {{end}}
 
   <div class="actions">
     <button type="submit">Sauvegarder</button>

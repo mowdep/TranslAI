@@ -1,0 +1,44 @@
+# Dev/CI containerisé. Le code source est monté en volume → build/test sur le
+# code vivant, toolchain + golangci-lint reproductibles (pas d'install locale).
+#
+#   docker compose run --rm dev              # make check (gate)
+#   docker compose run --rm dev go test ./... -run TestX
+#   docker compose --profile integration up  # tests intégration vs ollama réel
+
+services:
+  dev:
+    build:
+      context: .
+      target: base
+    working_dir: /src
+    volumes:
+      - .:/src
+      - gomod:/go/pkg/mod   # cache modules entre runs
+    command: make check
+
+  # Optionnel : Ollama local pour `make test-integration`.
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["integration"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+
+  integration:
+    build:
+      context: .
+      target: base
+    profiles: ["integration"]
+    working_dir: /src
+    depends_on: [ollama]
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434/v1
+    volumes:
+      - .:/src
+      - gomod:/go/pkg/mod
+    command: make test-integration
+
+volumes:
+  gomod:
+  ollama:

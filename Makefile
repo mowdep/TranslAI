@@ -1,7 +1,8 @@
 BINARY := translai
 PKG    := ./...
 
-.PHONY: all build run test test-integration lint vet fmt check tidy clean
+.PHONY: all build run test test-integration lint vet fmt check tidy clean \
+        docker-test docker-build docker-check docker-int
 
 all: check
 
@@ -39,6 +40,24 @@ tidy:
 # Gate milestone : doit être 100% vert AVANT chaque commit gitmoji.
 check: tidy vet lint test build
 	@echo "OK — gate milestone verte"
+
+# --- Docker ---
+
+# Gate dans le conteneur (lint inclus, indépendant de l'install locale).
+docker-test:
+	docker build --target test -t $(BINARY):test .
+
+# Image runtime distroless (CLI).
+docker-build:
+	docker build --target runtime -t $(BINARY):latest .
+
+# Gate sur le code monté en volume (itération rapide).
+docker-check:
+	docker compose run --rm dev make check
+
+# Tests intégration vs Ollama réel (compose).
+docker-int:
+	docker compose --profile integration run --rm integration
 
 clean:
 	rm -f $(BINARY)

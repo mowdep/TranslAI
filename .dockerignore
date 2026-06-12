@@ -1,0 +1,11 @@
+.git
+.gitignore
+/translai
+/dist
+*.test
+*.out
+coverage.*
+.idea
+.vscode
+config/
+subs-fr/

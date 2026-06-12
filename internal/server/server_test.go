@@ -2,6 +2,7 @@ package server
 
 import (
 	"archive/zip"
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -435,50 +436,28 @@ type sseEvent struct {
 }
 
 type sseScanner struct {
-	r      io.Reader
-	buf    []byte
-	cur    sseEvent
-	done   bool
+	sc  *bufio.Scanner
+	cur sseEvent
 }
 
 func newSSEScanner(r io.Reader) *sseScanner {
-	return &sseScanner{r: r}
+	return &sseScanner{sc: bufio.NewScanner(r)}
 }
 
 func (s *sseScanner) Scan() bool {
-	if s.done {
-		return false
-	}
-	tmp := make([]byte, 4096)
-	n, err := s.r.Read(tmp)
-	if n > 0 {
-		s.buf = append(s.buf, tmp[:n]...)
-	}
-	if err != nil {
-		s.done = true
-	}
-
-	// Parse SSE lines
-	lines := strings.Split(string(s.buf), "\n")
 	var evType, evData string
-	found := false
-	for _, line := range lines {
-		line = strings.TrimRight(line, "\r")
+	for s.sc.Scan() {
+		line := strings.TrimRight(s.sc.Text(), "\r")
 		if strings.HasPrefix(line, "event: ") {
 			evType = strings.TrimPrefix(line, "event: ")
 		} else if strings.HasPrefix(line, "data: ") {
 			evData = strings.TrimPrefix(line, "data: ")
 		} else if line == "" && evType != "" {
 			s.cur = sseEvent{eventType: evType, data: evData}
-			found = true
-			break
+			return true
 		}
 	}
-	if found {
-		s.buf = nil
-		return true
-	}
-	return !s.done
+	return false
 }
 
 func (s *sseScanner) Event() sseEvent {

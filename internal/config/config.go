@@ -76,7 +76,8 @@ func Save(path string, c *Config) error {
 }
 
 // Validate vérifie la cohérence de la Config.
-// Retourne une erreur si le provider actif est absent, ou si BaseURL est vide.
+// Retourne une erreur si le provider actif est absent, si le type est inconnu,
+// ou si BaseURL est vide pour les providers qui en ont besoin (openai_compat).
 func Validate(c *Config) error {
 	if c.ActiveProvider == "" {
 		return fmt.Errorf("config: active_provider vide")
@@ -85,8 +86,17 @@ func Validate(c *Config) error {
 	if !ok {
 		return fmt.Errorf("config: provider %q absent de la section providers", c.ActiveProvider)
 	}
-	if p.BaseURL == "" {
-		return fmt.Errorf("config: provider %q: base_url vide", c.ActiveProvider)
+	switch p.Type {
+	case "openai_compat":
+		if p.BaseURL == "" {
+			return fmt.Errorf("config: provider %q (openai_compat): base_url vide", c.ActiveProvider)
+		}
+	case "anthropic", "gemini":
+		// endpoint fixe, base_url optionnel
+	case "":
+		return fmt.Errorf("config: provider %q: type vide", c.ActiveProvider)
+	default:
+		return fmt.Errorf("config: provider %q: type inconnu %q", c.ActiveProvider, p.Type)
 	}
 	return nil
 }

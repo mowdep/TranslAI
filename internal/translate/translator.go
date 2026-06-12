@@ -5,7 +5,12 @@
 // contrat len(out) == len(req.Texts).
 package translate
 
-import "context"
+import (
+	"context"
+	"fmt"
+
+	"github.com/gabrielfareau/translai/internal/config"
+)
 
 // Request est un batch à traduire.
 type Request struct {
@@ -23,3 +28,18 @@ type Translator interface {
 
 // Registry associe un nom de provider à son Translator.
 type Registry map[string]Translator
+
+// FromConfig instancie le Translator correspondant au type de ProviderConfig.
+// Supporte : "openai_compat", "anthropic", "gemini".
+func FromConfig(cfg config.ProviderConfig) (Translator, error) {
+	switch cfg.Type {
+	case "openai_compat":
+		return NewOpenAICompat("openai_compat", cfg.BaseURL, cfg.Model, cfg.APIKey, cfg.Temperature), nil
+	case "anthropic":
+		return NewAnthropicClient(cfg), nil
+	case "gemini":
+		return NewGeminiClient(cfg), nil
+	default:
+		return nil, fmt.Errorf("translate: type de provider inconnu: %q", cfg.Type)
+	}
+}

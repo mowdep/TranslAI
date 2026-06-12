@@ -132,14 +132,44 @@ func TestValidate(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "valide",
+			name: "valide openai_compat",
 			cfg: &config.Config{
 				ActiveProvider: "ollama",
 				Providers: map[string]config.ProviderConfig{
-					"ollama": {BaseURL: "http://localhost:11434/v1"},
+					"ollama": {Type: "openai_compat", BaseURL: "http://localhost:11434/v1"},
 				},
 			},
 			wantErr: false,
+		},
+		{
+			name: "valide anthropic sans base_url",
+			cfg: &config.Config{
+				ActiveProvider: "ant",
+				Providers: map[string]config.ProviderConfig{
+					"ant": {Type: "anthropic", Model: "claude-3-5-haiku-20241022", APIKey: "sk-ant-xxx"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valide gemini sans base_url",
+			cfg: &config.Config{
+				ActiveProvider: "gem",
+				Providers: map[string]config.ProviderConfig{
+					"gem": {Type: "gemini", Model: "gemini-1.5-flash", APIKey: "AIza-xxx"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "type inconnu",
+			cfg: &config.Config{
+				ActiveProvider: "bad",
+				Providers: map[string]config.ProviderConfig{
+					"bad": {Type: "unknown", BaseURL: "http://example.com"},
+				},
+			},
+			wantErr: true,
 		},
 		{
 			name:    "active_provider vide",
@@ -155,11 +185,11 @@ func TestValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "base_url vide",
+			name: "base_url vide pour openai_compat",
 			cfg: &config.Config{
 				ActiveProvider: "ollama",
 				Providers: map[string]config.ProviderConfig{
-					"ollama": {BaseURL: ""},
+					"ollama": {Type: "openai_compat", BaseURL: ""},
 				},
 			},
 			wantErr: true,

@@ -1,0 +1,58 @@
+{{define "content"}}
+<h1>Traduction de sous-titres</h1>
+
+<div class="card">
+  <div id="drop-zone" role="button" tabindex="0" aria-label="Zone de depot de fichiers SRT">
+    <input type="file" id="file-input" accept=".srt" multiple>
+    <div>Glissez-deposez vos fichiers <strong>.srt</strong> ici</div>
+    <div class="hint">ou cliquez pour selectionner</div>
+  </div>
+
+  <ul id="file-list"></ul>
+
+  <div class="controls">
+    <div class="field">
+      <label for="source-lang">Langue source</label>
+      <select id="source-lang" name="source">
+        <option value="auto">Detection auto</option>
+        <option value="en">Anglais (en)</option>
+        <option value="fr">Francais (fr)</option>
+        <option value="es">Espagnol (es)</option>
+        <option value="de">Allemand (de)</option>
+        <option value="it">Italien (it)</option>
+        <option value="pt">Portugais (pt)</option>
+        <option value="nl">Neerlandais (nl)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="target-lang">Langue cible</label>
+      <select id="target-lang" name="target">
+        <option value="fr"{{if eq .DefaultTarget "fr"}} selected{{end}}>Francais (fr)</option>
+        <option value="en"{{if eq .DefaultTarget "en"}} selected{{end}}>Anglais (en)</option>
+        <option value="es"{{if eq .DefaultTarget "es"}} selected{{end}}>Espagnol (es)</option>
+        <option value="de"{{if eq .DefaultTarget "de"}} selected{{end}}>Allemand (de)</option>
+        <option value="it"{{if eq .DefaultTarget "it"}} selected{{end}}>Italien (it)</option>
+        <option value="pt"{{if eq .DefaultTarget "pt"}} selected{{end}}>Portugais (pt)</option>
+        <option value="nl"{{if eq .DefaultTarget "nl"}} selected{{end}}>Neerlandais (nl)</option>
+      </select>
+    </div>
+    <button id="convert-btn" disabled>Convertir</button>
+  </div>
+</div>
+
+<div id="progress-section" class="card" hidden>
+  <h2>Progression</h2>
+  <div class="progress-bar-wrap">
+    <div id="progress-bar" class="progress-bar"></div>
+  </div>
+  <div id="progress-status">En attente...</div>
+</div>
+
+<div id="results-section" class="card" hidden>
+  <h2>Resultats</h2>
+  <div id="results-list"></div>
+  <div style="margin-top:0.75rem;">
+    <a id="download-all-btn" class="btn btn-ghost btn-sm" href="#" hidden>Tout telecharger (.zip)</a>
+  </div>
+</div>
+{{end}}

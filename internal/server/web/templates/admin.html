@@ -1,0 +1,70 @@
+{{define "content"}}
+<h1>Configuration</h1>
+
+<div id="save-feedback" class="alert" hidden></div>
+
+<form id="config-form" method="post" action="/api/config">
+
+  <div class="card">
+    <h2>Parametres globaux</h2>
+    <div class="global-fields">
+      <div class="field">
+        <label for="active_provider">Provider actif</label>
+        <select id="active_provider" name="active_provider">
+          {{range $name, $p := .Providers}}
+          <option value="{{$name}}"{{if eq $name $.ActiveProvider}} selected{{end}}>{{$name}}</option>
+          {{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label for="default_target">Langue cible par defaut</label>
+        <input type="text" id="default_target" name="default_target" value="{{.DefaultTarget}}" placeholder="fr">
+      </div>
+      <div class="field">
+        <label for="batch_size">Batch size</label>
+        <input type="number" id="batch_size" name="batch_size" value="{{.BatchSize}}" min="1" max="200">
+      </div>
+      <div class="field">
+        <label for="concurrency">Concurrency</label>
+        <input type="number" id="concurrency" name="concurrency" value="{{.Concurrency}}" min="1" max="32">
+      </div>
+    </div>
+  </div>
+
+  {{range $name, $p := .Providers}}
+  <div class="provider-card{{if eq $name $.ActiveProvider}} active{{end}}">
+    <div class="provider-header">
+      <h3>Provider : {{$name}}</h3>
+      <button type="button" class="btn btn-ghost btn-sm test-provider-btn" data-provider="{{$name}}">Tester la connexion</button>
+      <span class="test-feedback feedback"></span>
+    </div>
+    <div class="form-grid">
+      <div class="field">
+        <label>Type</label>
+        <input type="text" name="provider[{{$name}}][type]" value="{{$p.Type}}" placeholder="openai_compat">
+      </div>
+      <div class="field full">
+        <label>Base URL</label>
+        <input type="url" name="provider[{{$name}}][base_url]" value="{{$p.BaseURL}}" placeholder="http://localhost:11434/v1">
+      </div>
+      <div class="field">
+        <label>Modele</label>
+        <input type="text" name="provider[{{$name}}][model]" value="{{$p.Model}}" placeholder="llama3.2">
+      </div>
+      <div class="field">
+        <label>API Key</label>
+        <input type="password" name="provider[{{$name}}][api_key]" value="{{$p.APIKey}}" placeholder="(vide si local)" autocomplete="off">
+      </div>
+      <div class="field">
+        <label>Temperature</label>
+        <input type="number" name="provider[{{$name}}][temperature]" value="{{$p.Temperature}}" step="0.1" min="0" max="2">
+      </div>
+    </div>
+  </div>
+  {{end}}
+
+  <div class="actions">
+    <button type="submit">Sauvegarder</button>
+  </div>
+</form>
+{{end}}

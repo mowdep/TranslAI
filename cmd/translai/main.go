@@ -40,6 +40,7 @@ func newRootCmd() *cobra.Command {
 		Version:       version,
 	}
 	root.AddCommand(newTranslateCmd())
+	root.AddCommand(newWebCmd())
 	return root
 }
 

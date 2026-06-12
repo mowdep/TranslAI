@@ -3,9 +3,9 @@
 Plan d'exécution autonome pour Claude Code. Source de vérité fonctionnelle :
 `.claude/PROMPT.md`. Ce fichier découpe la **v0 CLI** en milestones atomiques.
 
-> **Périmètre v0** : phases 0–7 (CLI). PAS de serveur web, review, cloud, Docker
-> (phases 8+ reportées). Module `github.com/gabrielfareau/translai`, binaire
-> `translai`.
+> **Périmètre v0** : phases 0–7 (CLI). Les phases 8–10 (web, review, cloud,
+> Docker) sont le périmètre v1. Module `github.com/gabrielfareau/translai`,
+> binaire `translai`.
 
 ---
 
@@ -64,6 +64,10 @@ Le thread principal **orchestre**, il ne code pas chaque phase à la main :
 | 4 | `docs/spec/pipeline.md` | `internal/core` |
 | 5–6 | `docs/spec/cli.md` | `cmd/translai` |
 | 7 | `docs/spec/config.md` | `internal/config` |
+| 8 | `docs/spec/web.md` | `internal/server` |
+| 8.5 | `docs/spec/review.md` | `internal/server` (review + write-behind) |
+| 9 | `docs/spec/providers.md` | `internal/translate` |
+| 10 | `docs/spec/docker.md` | `Dockerfile` + `docker-compose.yml` |
 
 Chaque bloc de phase ci-dessous est le résumé ; **la spec fait foi** pour les
 types, signatures et tests.
@@ -138,15 +142,50 @@ overrides CLI (`--provider/--model`) priment sur le YAML.
   API non vide, résolution provider actif + overrides.
 - **Gate** + **Commit** : `✨ feat(config): store YAML thread-safe + résolution provider`
 
+### Phase 8 — Serveur web
+`internal/server/` : chi router, assets embarqués via `//go:embed`, templates
+HTMX, SSE de conversion, upload multi-fichiers, download `.srt` et `.zip`,
+page admin + test connexion. Sous-commande Cobra `web --addr :8080 --config`.
+- **Test** : `httptest` + `goquery` — upload, SSE, download, config masquée.
+- **Gate** + **Commit** :
+  `✨ feat(server): serveur HTTP HTMX + SSE + upload/download`
+
+### Phase 8.5 — Review / éditeur d'alignement
+Store de jobs mutable (in-memory + write-behind disque : debounce + ticker +
+flush SIGTERM), page `/review` side-by-side, flagging automatique des cues
+suspectes (echo, ratio, CPS, fallback, line-mismatch), autosave PATCH,
+retraduction d'une cue.
+- **Test** : edit → flush → reload restaure l'état ; SIGTERM flush bien tout
+  job `dirty`.
+- **Gate** + **Commit** :
+  `✨ feat(review): editeur alignement + write-behind + flagging cues suspectes`
+
+### Phase 9 — Providers cloud
+`internal/translate/anthropic.go` + `gemini.go`. Même interface `Translator`,
+même contrat `len(out)==len(in)`. Vérifier la doc API à jour au moment de
+l'implémentation.
+- **Test** : `httptest` mock — requête bien formée, parsing réponse, contrat
+  longueur, erreur HTTP 4xx.
+- **Gate** + **Commit** :
+  `✨ feat(translate): providers cloud Anthropic + Gemini`
+
+### Phase 10 — Docker
+`Dockerfile` multi-stage (`golang:1.23-alpine` → `distroless/static-debian12`),
+`docker-compose.yml` (translai + ollama), config d'exemple, README quickstart.
+- **Validation** : `docker build` OK, `docker compose up` → UI accessible,
+  SIGTERM → flush → restart → état restauré.
+- **Gate** + **Commit** :
+  `🐳 chore(docker): Dockerfile multi-stage + docker-compose + README quickstart`
+
 ---
 
 ## Clôture v0
 Après Phase 7 verte : vérifier toute la checklist « Définition de terminé »,
 puis `📝 docs: bilan v0 CLI` si des notes/README minimal sont ajoutés.
 
-> **Post-v0** (non inclus) : phase 8 web (HTMX+SSE, tests httptest+goquery),
-> 8.5 review/write-behind, 9 cloud (Anthropic/Gemini), 10 Docker. Voir
-> `.claude/PROMPT.md` pour les specs.
+## Clôture v1
+Après Phase 10 verte : vérifier la checklist complète de `.claude/PROMPT.md`
+§11, puis `📝 docs: bilan v1 web+docker`.
 
 ---
 
@@ -162,6 +201,7 @@ puis `📝 docs: bilan v0 CLI` si des notes/README minimal sont ajoutés.
 | 🔧 | `chore` | config/outillage (lint, make) |
 | 📝 | `docs` | documentation |
 | 🚧 | `wip` | travail en cours (éviter en milestone) |
+| 🐳 | `chore` | Docker (Dockerfile, compose) |
 
 Format : `:emoji: type(scope): sujet impératif court`. Les tests d'une phase sont
 inclus dans le commit `feat` de cette phase (pas de commit séparé sauf correctif).

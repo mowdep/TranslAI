@@ -6,8 +6,7 @@ OpenAI-compatible). CLI Go, binaire statique unique.
 **Préserve index et timestamps** : seul le texte est traduit puis réinjecté.
 Tags de formatage (`<i>`, `{\an8}`) et retours-ligne internes conservés.
 
-> État : **MVP CLI** (traduction fichier unique). Mode batch, config persistée,
-> UI web et éditeur de relecture sont prévus (voir [docs/PLAN.md](docs/PLAN.md)).
+> État : **v1** — CLI + UI web HTMX + éditeur de relecture + Docker. Providers : Ollama, llama.cpp, OpenAI-compatible, Anthropic, Gemini.
 
 ## Prérequis
 
@@ -58,13 +57,44 @@ translai translate -i film.srt --target fr \
 
 La progression s'affiche sur stderr ; code retour ≠ 0 si la traduction échoue.
 
-## Docker
+## Quickstart (Docker)
+
+Pre-requis : Docker + Docker Compose.
+
+1. Copier la config d'exemple dans `./config/` (deja presente dans le repo) :
+   ```bash
+   # config/config.yaml est deja dans le repo, pret a l'emploi.
+   # Editer le modele ou les providers selon vos besoins.
+   ```
+
+2. Lancer les services :
+   ```bash
+   docker compose up -d
+   ```
+   L'interface web est accessible sur `http://localhost:8080`.
+
+3. Tirer un modele Ollama (premiere utilisation) :
+   ```bash
+   docker compose exec ollama ollama pull qwen2.5:7b
+   ```
+
+4. Ouvrir `http://localhost:8080`, verifier la connexion au provider, puis
+   deposer un fichier `.srt` pour le traduire.
+
+5. Arreter les services :
+   ```bash
+   docker compose down
+   ```
+   Le volume `/config` persiste la configuration et les jobs (etat de review restaure au redemarrage).
+
+### CLI Docker (sans UI)
 
 ```bash
-make docker-build      # image translai:latest (distroless)
+# Construire l'image
+docker build -t translai .
 
-# Traduire un fichier (Ollama tournant sur l'hôte)
-docker run --rm -v "$PWD:/data" translai:latest \
+# Traduire un fichier (Ollama tournant sur l'hote)
+docker run --rm -v "$PWD:/data" translai \
   translate -i /data/film.srt --target fr \
   --base-url http://host.docker.internal:11434/v1 --model llama3.2
 ```
@@ -92,10 +122,4 @@ make docker-int     # tests d'intégration vs Ollama réel (docker compose)
 Architecture et plan de build par phases : [docs/PLAN.md](docs/PLAN.md),
 specs par package : [docs/spec/](docs/spec/).
 
-## Limites actuelles (MVP)
-
-- Fichier unique seulement (pas encore de batch dossier/glob).
-- Pas de config persistée (`config.yaml`) ni de provider Anthropic/Gemini.
-- Pas d'interface web ni d'éditeur de relecture.
-
-Voir [docs/PLAN.md](docs/PLAN.md) pour la suite.
+Voir [docs/PLAN.md](docs/PLAN.md) pour les specs et l'historique des phases.

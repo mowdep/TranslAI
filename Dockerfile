@@ -1,5 +1,4 @@
 # Multi-stage : base (toolchain) → test (gate) → build (binaire) → runtime (distroless).
-# v0 = CLI. Pas de serveur web, pas d'EXPOSE (phase 8+).
 
 ############################ base : toolchain Go + lint ############################
 FROM golang:1.23-alpine AS base
@@ -12,19 +11,24 @@ RUN go mod download
 COPY . .
 
 ############################ test : gate complet ############################
-# Échoue le build si vet/lint/test/build rouge. `docker build --target test`.
+# Echoue le build si vet/lint/test/build rouge. `docker build --target test`.
 FROM base AS test
 RUN make check
 
 ############################ build : binaire statique ############################
 FROM base AS build
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /translai ./cmd/translai
+RUN CGO_ENABLED=0 GOOS=linux go build \
+      -ldflags="-s -w" \
+      -o /translai \
+      ./cmd/translai
 
 ############################ runtime : image finale minimale ############################
-FROM gcr.io/distroless/static-debian12 AS runtime
+FROM gcr.io/distroless/static-debian12
 COPY --from=build /translai /translai
-# CLI : monter les fichiers à traduire, ex:
-#   docker run --rm -v "$PWD:/data" translai translate -i /data/film.srt --target fr
-VOLUME ["/data"]
+
+# /config persiste config.yaml et les snapshots de jobs (WorkDir).
+VOLUME ["/config"]
+EXPOSE 8080
+
 ENTRYPOINT ["/translai"]
-CMD ["--help"]
+CMD ["web", "--addr", ":8080", "--config", "/config/config.yaml"]

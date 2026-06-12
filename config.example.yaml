@@ -1,0 +1,13 @@
+active_provider: ollama
+default_target: fr
+batch_size: 25
+concurrency: 2
+flush_debounce: 4
+flush_interval: 60
+work_dir: /config/jobs
+providers:
+  ollama:
+    type: openai_compat
+    base_url: http://ollama:11434/v1
+    model: qwen2.5:7b
+    temperature: 0.2
